@@ -11,21 +11,23 @@ struct monoArray
     void* bounds;
     int   max_length;
     T vector [0];
+    
     int getLength()
     {
         return max_length;
     }
+    
     T *getPointer()
     {
         return vector;
     }
 
-    template<typename V = T>
-    std::vector<V> toCPPlist() {
-        std::vector<V> ret;
+    // ✅ แก้ไข: ลบ template keyword ออก
+    std::vector<T> toCPPlist() {
+        std::vector<T> ret;
         for (int i = 0; i < max_length; i++)
             ret.push_back(vector[i]);
-        return std::move(ret);
+        return ret;  //  ไม่ต้อง std::move (copy elision อยู่แล้ว)
     }
 };
 
@@ -51,12 +53,13 @@ struct monoList {
 };
 
 template<typename TKey, typename TValue>
-    struct Dictionary {
+struct Dictionary {
     struct Entry {
         int hashCode, next;
         TKey key;
         TValue value;
     };
+    
     void *klass;
     void *monitor;
     monoArray<int> *buckets;
@@ -70,28 +73,29 @@ template<typename TKey, typename TValue>
     monoArray<TValue> *values;
     void *syncRoot;
 
+    // ✅ แก้ไข: template toCPPlist() → toCPPlist()
     std::map<TKey, TValue> toMap() {
         std::map<TKey, TValue> ret;
-        auto lst = entries->template toCPPlist();
+        auto lst = entries->toCPPlist();
         for (auto enter : lst)
             ret.insert(std::make_pair(enter.key, enter.value));
-        return std::move(ret);
+        return ret;
     }
 
     std::vector<TKey> getKeys() {
         std::vector<TKey> ret;
-        auto lst = entries->template toCPPlist();
+        auto lst = entries->toCPPlist();
         for (auto enter : lst)
             ret.push_back(enter.key);
-        return std::move(ret);
+        return ret;
     }
 
     std::vector<TValue> getValues() {
         std::vector<TValue> ret;
-        auto lst = entries->template toCPPlist();
+        auto lst = entries->toCPPlist();
         for (auto enter : lst)
             ret.push_back(enter.value);
-        return std::move(ret);
+        return ret;
     }
 
     int getSize() {
@@ -131,29 +135,33 @@ typedef struct _monoString
     void* klass;
     void* monitor;
     int length;    
-    char chars[1];   
+    char chars[1];
+    
     int getLength()
     {
-      return length;
+        return length;
     }
+    
     char* getChars()
     {
         return chars;
     }
+    
     NSString* toNSString()
     {
-      return [[NSString alloc] initWithBytes:(const void *)(chars)
-                     length:(NSUInteger)(length * 2)
-                     encoding:(NSStringEncoding)NSUTF16LittleEndianStringEncoding];
+        return [[NSString alloc] initWithBytes:(const void *)(chars)
+                                        length:(NSUInteger)(length * 2)
+                                      encoding:NSUTF16LittleEndianStringEncoding];
     }
 
     char* toCString()
     {
-      NSString* v1 = toNSString();
-      return (char*)([v1 UTF8String]);  
+        NSString* v1 = toNSString();
+        return (char*)([v1 UTF8String]);  
     }
+    
     std::string toCPPString()
     {
-      return std::string(toCString());
+        return std::string(toCString());
     }
-}monoString;
+} monoString;
