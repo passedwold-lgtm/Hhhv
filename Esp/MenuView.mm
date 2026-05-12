@@ -158,7 +158,7 @@
     [self addSubview:self.discordButton];
 
     // --- Content Area ---
-    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(contentStartX, headerHeight, contentWidth, CGRectGetHeight(self.bounds) - headerHeight - 50)];
+    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(contentStartX, headerHeight, contentWidth, CGRectGetHeight(self.bounds) - headerHeight - 36)];
     self.scrollView.showsVerticalScrollIndicator = NO;
     self.scrollView.backgroundColor = [UIColor clearColor];
     [self addSubview:self.scrollView];
@@ -167,7 +167,7 @@
     [self.scrollView addSubview:self.contentView];
 
     // Footer
-    self.footerLabel = [[UILabel alloc] initWithFrame:CGRectMake(contentStartX + 80, CGRectGetHeight(self.bounds) - 35, contentWidth - 80, 25)];
+    self.footerLabel = [[UILabel alloc] initWithFrame:CGRectMake(contentStartX + 80, CGRectGetHeight(self.bounds) - 28, contentWidth - 80, 20)];
     self.footerLabel.textAlignment = NSTextAlignmentRight;
     self.footerLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.3];
     self.footerLabel.font = [UIFont italicSystemFontOfSize:10];
@@ -281,15 +281,12 @@
 }
 
 - (void)addThemeSlider:(NSString *)title property:(NSString *)prop max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(MenuSliderHandler)handler {
-    __weak typeof(self) weakSelf = self;
+    // ✅ แก้ไข: ใช้ self แทน weak/strong
     [self addSlider:title max:max min:min value:value handler:^(CGFloat val) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (strongSelf) {
-            objc_setAssociatedObject(strongSelf, [prop UTF8String], @(val), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            if ([prop isEqualToString:@"opacity"]) strongSelf.alpha = val;
-            else if ([prop isEqualToString:@"corner"]) strongSelf.layer.cornerRadius = val;
-            else if ([prop isEqualToString:@"border"]) strongSelf.layer.borderWidth = val;
-        }
+        objc_setAssociatedObject(self, [prop UTF8String], @(val), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if ([prop isEqualToString:@"opacity"]) self.alpha = val;
+        else if ([prop isEqualToString:@"corner"]) self.layer.cornerRadius = val;
+        else if ([prop isEqualToString:@"border"]) self.layer.borderWidth = val;
         if (handler) handler(val);
     }];
 }
@@ -517,7 +514,9 @@
 - (void)closeButtonTapped:(UIButton *)sender { [self closeMenu]; }
 - (void)socialButtonTapped:(UIButton *)sender {
     NSString *urlStr = (sender == self.telegramButton) ? self.telegramURL : self.discordURL;
-    if (urlStr) [[UIApplication sharedApplication] openURL:[NSURL URLWithString:urlStr] options:@{} completionHandler:nil];
+    if (urlStr && urlStr.length > 0) {
+        [[UIApplication sharedApplication] openURL:[NSURL URLWithString:urlStr] options:@{} completionHandler:nil];
+    }
 }
 
 - (void)switchChanged:(UISwitch *)sender {
