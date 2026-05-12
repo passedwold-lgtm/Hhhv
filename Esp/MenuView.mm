@@ -281,13 +281,16 @@
 }
 
 - (void)addThemeSlider:(NSString *)title property:(NSString *)prop max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(MenuSliderHandler)handler {
-    // ✅ แก้ไข: ใช้ self แทน weak/strong
+    __weak typeof(self) weakSelf = self;
     [self addSlider:title max:max min:min value:value handler:^(CGFloat val) {
-        objc_setAssociatedObject(self, [prop UTF8String], @(val), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if ([prop isEqualToString:@"opacity"]) self.alpha = val;
-        else if ([prop isEqualToString:@"corner"]) self.layer.cornerRadius = val;
-        else if ([prop isEqualToString:@"border"]) self.layer.borderWidth = val;
-        if (handler) handler(val);
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf) {
+            objc_setAssociatedObject(strongSelf, [prop UTF8String], @(val), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            if ([prop isEqualToString:@"opacity"]) strongSelf.alpha = val;
+            else if ([prop isEqualToString:@"corner"]) strongSelf.layer.cornerRadius = val;
+            else if ([prop isEqualToString:@"border"]) strongSelf.layer.borderWidth = val;
+            if (handler) handler(val);
+        }
     }];
 }
 
