@@ -281,17 +281,16 @@
 }
 
 - (void)addThemeSlider:(NSString *)title property:(NSString *)prop max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(MenuSliderHandler)handler {
-    __weak typeof(self) weakSelf = self;
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Warc-retain-cycles"
     [self addSlider:title max:max min:min value:value handler:^(CGFloat val) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (strongSelf) {
-            objc_setAssociatedObject(strongSelf, [prop UTF8String], @(val), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            if ([prop isEqualToString:@"opacity"]) strongSelf.alpha = val;
-            else if ([prop isEqualToString:@"corner"]) strongSelf.layer.cornerRadius = val;
-            else if ([prop isEqualToString:@"border"]) strongSelf.layer.borderWidth = val;
-            if (handler) handler(val);
-        }
+        objc_setAssociatedObject(self, [prop UTF8String], @(val), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if ([prop isEqualToString:@"opacity"]) self.alpha = val;
+        else if ([prop isEqualToString:@"corner"]) self.layer.cornerRadius = val;
+        else if ([prop isEqualToString:@"border"]) self.layer.borderWidth = val;
+        if (handler) handler(val);
     }];
+    #pragma clang diagnostic pop
 }
 
 - (void)makeDraggable {
