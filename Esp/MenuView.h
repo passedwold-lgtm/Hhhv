@@ -36,7 +36,16 @@ typedef void (^MenuButtonHandler)(void);
 @property (nonatomic, copy) NSString *telegramURL;
 @property (nonatomic, copy) NSString *discordURL;
 
+// ── New UI-clone properties ──────────────────────────────────────────────────
+@property (nonatomic, strong) UIButton *downloadButton;
+@property (nonatomic, strong) UIButton *themeButton;
+// ────────────────────────────────────────────────────────────────────────────
+
 + (instancetype)menuWithFrame:(CGRect)frame;
+
+/// Creates a locked 620×420 menu that matches the screenshot UI exactly.
++ (instancetype)menuWithScreenshotStyle;
+
 - (void)makeDraggable;
 - (void)canMove:(BOOL)enabled;
 - (void)addFeatureSwitch:(NSString *)title description:(NSString *)desc isOn:(BOOL)isOn handler:(MenuSwitchHandler)handler;
