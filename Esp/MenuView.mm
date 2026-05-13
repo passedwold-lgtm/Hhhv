@@ -1,22 +1,46 @@
 #import "MenuView.h"
 #import <objc/runtime.h>
 
+// ── Screenshot-clone colour palette ─────────────────────────────────────────
+#define kAccentOrange   [UIColor colorWithRed:232/255.0 green:150/255.0 blue:12/255.0  alpha:1.0]
+#define kAccentOrangeDim [UIColor colorWithRed:232/255.0 green:150/255.0 blue:12/255.0  alpha:0.18]
+#define kBgDark         [UIColor colorWithRed:26/255.0  green:18/255.0  blue:0/255.0   alpha:1.0]
+#define kBgSidebar      [UIColor colorWithRed:18/255.0  green:13/255.0  blue:0/255.0   alpha:1.0]
+#define kBgRow          [UIColor colorWithRed:32/255.0  green:22/255.0  blue:0/255.0   alpha:1.0]
+#define kBorderWeak     [UIColor colorWithWhite:1.0 alpha:0.07]
+#define kTextDim        [UIColor colorWithWhite:1.0 alpha:0.45]
+
+// Fixed size matching the screenshot
+static const CGFloat kMenuWidth  = 620.0;
+static const CGFloat kMenuHeight = 420.0;
+// ────────────────────────────────────────────────────────────────────────────
+
 @interface MenuView ()
 @property (nonatomic, assign) CGFloat contentHeight;
-@property (nonatomic, strong) NSMutableArray<UIView *> *internalContainers;
+@property (nonatomic, strong) UIView *pillView;
+@property (nonatomic, strong) UIView *contentHeaderView;
+@property (nonatomic, strong) UIView *headerTitleView;
+@property (nonatomic, strong) UIImageView *headerIconImageView;
+@property (nonatomic, strong) UILabel *headerTitleLabel;
+@property (nonatomic, strong) UIButton *searchButton;
+@property (nonatomic, strong) UIButton *themeToggleButton;
+@property (nonatomic, strong) NSMutableArray<UIView *> *tabContainers;
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *tabHeights;
+@property (nonatomic, strong) NSArray<NSString *> *tabTitles;
+@property (nonatomic, assign) NSInteger currentTabIndex;
+@property (nonatomic, strong) UILabel *footerLabel;
+/// YES when the menu was created in screenshot-clone style (orange/brown theme, locked size)
+@property (nonatomic, assign) BOOL screenshotStyle;
+- (void)customizeScrollIndicator;
+- (void)applyScreenshotStyleColours;
+- (void)buildScreenshotHeaderButtons;
 @end
 
 @implementation MenuView
 
-// =========================================================================
-// CONFIGURATION: สีดำ-ทอง ตามรูปภาพ
-// =========================================================================
-#define COLOR_BG_MAIN       [UIColor colorWithRed:0.12f green:0.08f blue:0.06f alpha:1.0]
-#define COLOR_BG_ROW        [UIColor colorWithRed:0.18f green:0.13f blue:0.10f alpha:1.0]
-#define COLOR_ACCENT_GOLD   [UIColor colorWithRed:1.00f green:0.71f blue:0.29f alpha:1.0]
-#define COLOR_TEXT_MAIN     [UIColor whiteColor]
-#define COLOR_TEXT_DIM      [UIColor colorWithWhite:1.0 alpha:0.5]
-#define COLOR_BORDER        [UIColor colorWithWhite:1.0 alpha:0.1]
+// ─────────────────────────────────────────────────────────────────────────────
+#pragma mark - Factory
+// ─────────────────────────────────────────────────────────────────────────────
 
 + (instancetype)menuWithFrame:(CGRect)frame {
     MenuView *menu = [[MenuView alloc] initWithFrame:frame];
@@ -24,320 +48,251 @@
     return menu;
 }
 
-- (void)setup {
-    // Initialize dictionaries and arrays from .h
-    self.switches = [NSMutableDictionary dictionary];
-    self.sliders = [NSMutableDictionary dictionary];
-    self.sliderLabels = [NSMutableDictionary dictionary];
-    self.buttons = [NSMutableDictionary dictionary];
-    self.textFields = [NSMutableDictionary dictionary];
-    self.tabButtons = [NSMutableArray array];
-    self.internalContainers = [NSMutableArray array];
-    self.contentHeight = 0;
+/// Creates the 620×420 orange/brown screenshot-style menu.
++ (instancetype)menuWithScreenshotStyle {
+    CGRect frame = CGRectMake(0, 0, kMenuWidth, kMenuHeight);
+    MenuView *menu = [[MenuView alloc] initWithFrame:frame];
+    menu.screenshotStyle = YES;
+    [menu setup];
+    [menu applyScreenshotStyleColours];
+    [menu buildScreenshotHeaderButtons];
+    return menu;
+}
 
-    // Main Window Setup
-    self.backgroundColor = COLOR_BG_MAIN;
-    self.layer.cornerRadius = 30.0;
+// ─────────────────────────────────────────────────────────────────────────────
+#pragma mark - Setup
+// ─────────────────────────────────────────────────────────────────────────────
+
+- (void)setup {
+    self.backgroundColor = [UIColor clearColor];
+    self.layer.cornerRadius = 18.0;
     self.layer.masksToBounds = YES;
-    self.layer.borderWidth = 1.5;
-    self.layer.borderColor = [COLOR_ACCENT_GOLD colorWithAlphaComponent:0.4].CGColor;
-    self.accentColor = COLOR_ACCENT_GOLD;
+    self.layer.borderWidth = 1.0;
+    self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.12].CGColor;
+    self.alpha = 0.92;
+    self.currentCategoryCounter = 0;
+    self.selectedTabIndex = 0;
     self.canMove = NO;
 
-    CGFloat sidebarWidth = 75;
-    CGFloat headerHeight = 85;
-    CGFloat contentStartX = sidebarWidth + 15;
-    CGFloat contentWidth = CGRectGetWidth(self.bounds) - contentStartX - 15;
+    // Default blue accent — overridden to orange in applyScreenshotStyleColours
+    self.accentColor = [UIColor colorWithRed:110.0/255.0 green:142.0/255.0 blue:251.0/255.0 alpha:1.0];
+    self.tabButtons    = [NSMutableArray array];
+    self.tabContainers = [NSMutableArray array];
+    self.tabHeights    = [NSMutableArray array];
+    self.switches      = [NSMutableDictionary dictionary];
+    self.sliders       = [NSMutableDictionary dictionary];
+    self.sliderLabels  = [NSMutableDictionary dictionary];
+    self.buttons       = [NSMutableDictionary dictionary];
+    self.textFields    = [NSMutableDictionary dictionary];
 
-    // --- Sidebar ---
-    self.tabSidebar = [[UIView alloc] initWithFrame:CGRectMake(10, 10, sidebarWidth, CGRectGetHeight(self.bounds) - 20)];
-    self.tabSidebar.backgroundColor = [COLOR_BG_MAIN colorWithAlphaComponent:0.6];
-    self.tabSidebar.layer.cornerRadius = 22.0;
+    UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleDark];
+    self.blurEffectView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
+    self.blurEffectView.frame = self.bounds;
+    self.blurEffectView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self addSubview:self.blurEffectView];
+
+    UIView *gradientOverlay = [[UIView alloc] initWithFrame:self.bounds];
+    gradientOverlay.backgroundColor = self.screenshotStyle
+        ? [kBgDark colorWithAlphaComponent:0.97]
+        : [UIColor colorWithRed:10.0/255.0 green:10.0/255.0 blue:22.0/255.0 alpha:0.55];
+    gradientOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self addSubview:gradientOverlay];
+
+    CGFloat sidebarWidth  = 76;
+    CGFloat headerHeight  = 78;
+    CGFloat contentStartX = sidebarWidth + 12;
+    CGFloat contentWidth  = CGRectGetWidth(self.bounds) - contentStartX;
+
+    // ── Sidebar ──────────────────────────────────────────────────────────────
+    self.tabSidebar = [[UIView alloc] initWithFrame:CGRectMake(12, 12, sidebarWidth, CGRectGetHeight(self.bounds) - 24)];
+    self.tabSidebar.backgroundColor = self.screenshotStyle
+        ? kBgSidebar
+        : [UIColor colorWithRed:6.0/255.0 green:6.0/255.0 blue:18.0/255.0 alpha:0.90];
+    self.tabSidebar.layer.cornerRadius = 18.0;
+    self.tabSidebar.layer.masksToBounds = YES;
+    self.tabSidebar.autoresizingMask = UIViewAutoresizingFlexibleHeight;
     [self addSubview:self.tabSidebar];
 
     self.tabScrollView = [[UIScrollView alloc] initWithFrame:self.tabSidebar.bounds];
-    self.tabScrollView.showsVerticalScrollIndicator = NO;
+    self.tabScrollView.showsVerticalScrollIndicator = YES;
+    self.tabScrollView.indicatorStyle = UIScrollViewIndicatorStyleWhite;
     self.tabScrollView.delegate = self;
+    self.tabScrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.tabSidebar addSubview:self.tabScrollView];
 
     self.tabContainerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, sidebarWidth, 0)];
     [self.tabScrollView addSubview:self.tabContainerView];
 
-    // --- Header Pill ---
-    UIView *pillView = [[UIView alloc] initWithFrame:CGRectMake(contentStartX, 20, 170, 42)];
-    pillView.backgroundColor = [COLOR_BG_ROW colorWithAlphaComponent:0.9];
-    pillView.layer.cornerRadius = 21;
-    pillView.layer.borderWidth = 1.0;
-    pillView.layer.borderColor = [COLOR_ACCENT_GOLD colorWithAlphaComponent:0.5].CGColor;
-    [self addSubview:pillView];
+    [self customizeScrollIndicator];
 
-    self.tabTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 170, 42)];
-    self.tabTitleLabel.text = @"MENU";
-    self.tabTitleLabel.textColor = COLOR_ACCENT_GOLD;
-    self.tabTitleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
-    self.tabTitleLabel.textAlignment = NSTextAlignmentCenter;
-    [pillView addSubview:self.tabTitleLabel];
+    UIView *separator = [[UIView alloc] initWithFrame:CGRectMake(sidebarWidth - 1, 0, 1, CGRectGetHeight(self.bounds))];
+    separator.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.07];
+    [self.tabSidebar addSubview:separator];
 
-    // Close Button
+    self.tabButtons = [NSMutableArray array];
+
+    // ── Header pill ──────────────────────────────────────────────────────────
+    CGFloat titleY     = 16;
+    CGFloat pillHeight = 42;
+    self.pillView = [[UIView alloc] initWithFrame:CGRectMake(contentStartX + 16, titleY, 178, pillHeight)];
+    self.pillView.backgroundColor = self.screenshotStyle ? kAccentOrangeDim : [UIColor colorWithWhite:1.0 alpha:0.07];
+    self.pillView.layer.cornerRadius = pillHeight / 2;
+    self.pillView.layer.borderWidth  = self.screenshotStyle ? 1.5 : 1.0;
+    self.pillView.layer.borderColor  = self.screenshotStyle
+        ? kAccentOrange.CGColor
+        : [UIColor colorWithWhite:1.0 alpha:0.08].CGColor;
+    [self addSubview:self.pillView];
+
+    self.pillIcon = [[UIImageView alloc] initWithFrame:CGRectMake(12, (pillHeight - 20) / 2.0, 20, 20)];
+    if (@available(iOS 13.0, *)) {
+        UIImageSymbolConfiguration *iconConfig = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
+        UIColor *iconTint = self.screenshotStyle ? kAccentOrange : self.accentColor;
+        self.pillIcon.image = [[UIImage systemImageNamed:@"scope" withConfiguration:iconConfig]
+                               imageWithTintColor:iconTint renderingMode:UIImageRenderingModeAlwaysOriginal];
+    }
+    self.pillIcon.contentMode = UIViewContentModeScaleAspectFit;
+    [self.pillView addSubview:self.pillIcon];
+
+    self.tabTitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(40, 0, self.pillView.frame.size.width - 48, pillHeight)];
+    self.tabTitleLabel.text      = @"AIMBOT";
+    self.tabTitleLabel.textColor = self.screenshotStyle ? kAccentOrange : [UIColor whiteColor];
+    self.tabTitleLabel.font      = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    self.tabTitleLabel.textAlignment = NSTextAlignmentLeft;
+    [self.pillView addSubview:self.tabTitleLabel];
+
+    self.searchButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.searchButton.frame = CGRectMake(self.pillView.frame.size.width - 32, (pillHeight - 20) / 2.0, 20, 20);
+    if (@available(iOS 13.0, *)) {
+        [self.searchButton setImage:[UIImage systemImageNamed:@"magnifyingglass"] forState:UIControlStateNormal];
+    }
+    self.searchButton.tintColor = [UIColor colorWithWhite:0.7 alpha:1.0];
+    if (!self.screenshotStyle) [self.pillView addSubview:self.searchButton];
+
+    // ── Close button ─────────────────────────────────────────────────────────
+    CGFloat buttonSize = 38;
+    CGFloat buttonY    = titleY + (pillHeight - buttonSize) / 2.0;
+
     self.closeButton = [UIButton buttonWithType:UIButtonTypeCustom];
-    self.closeButton.frame = CGRectMake(CGRectGetWidth(self.bounds) - 55, 20, 35, 35);
-    self.closeButton.backgroundColor = [COLOR_BG_ROW colorWithAlphaComponent:0.8];
-    self.closeButton.layer.cornerRadius = 17.5;
-    self.closeButton.layer.borderWidth = 1.0;
-    self.closeButton.layer.borderColor = COLOR_BORDER.CGColor;
-    [self.closeButton setTitle:@"✕" forState:UIControlStateNormal];
-    [self.closeButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    [self.closeButton addTarget:self action:@selector(closeMenu) forControlEvents:UIControlEventTouchUpInside];
+    self.closeButton.frame = CGRectMake(CGRectGetWidth(self.bounds) - buttonSize - 14, buttonY, buttonSize, buttonSize);
+    self.closeButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.08];
+    self.closeButton.layer.cornerRadius = 12.0;
+    self.closeButton.tintColor = self.screenshotStyle ? kAccentOrange : [UIColor whiteColor];
+    if (@available(iOS 13.0, *)) {
+        UIImageSymbolConfiguration *closeConfig = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightSemibold];
+        [self.closeButton setImage:[[UIImage systemImageNamed:@"xmark" withConfiguration:closeConfig]
+                                    imageWithTintColor:self.screenshotStyle ? kAccentOrange : [UIColor whiteColor]
+                                    renderingMode:UIImageRenderingModeAlwaysOriginal]
+                          forState:UIControlStateNormal];
+    } else {
+        [self.closeButton setTitle:@"✕" forState:UIControlStateNormal];
+        self.closeButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    }
+    [self.closeButton addTarget:self action:@selector(closeButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:self.closeButton];
 
-    // --- Content Area ---
-    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(contentStartX, headerHeight, contentWidth, CGRectGetHeight(self.bounds) - headerHeight - 20)];
-    self.scrollView.showsVerticalScrollIndicator = NO;
+    // ── Subtitle ─────────────────────────────────────────────────────────────
+    CGFloat subtitleY = titleY + pillHeight + 10;
+    self.subtitleLabel = [[UILabel alloc] initWithFrame:CGRectMake(contentStartX + 16, subtitleY, contentWidth - 32, 16)];
+    self.subtitleLabel.text      = @"";
+    self.subtitleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.40];
+    self.subtitleLabel.font      = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    self.subtitleLabel.textAlignment = NSTextAlignmentLeft;
+    [self addSubview:self.subtitleLabel];
+
+    // ── Content scroll view ───────────────────────────────────────────────────
+    self.scrollView = [[UIScrollView alloc] initWithFrame:CGRectMake(contentStartX, headerHeight, contentWidth, CGRectGetHeight(self.bounds) - headerHeight - 28)];
+    self.scrollView.showsVerticalScrollIndicator = YES;
+    self.scrollView.indicatorStyle = UIScrollViewIndicatorStyleWhite;
     self.scrollView.backgroundColor = [UIColor clearColor];
-    self.scrollView.delegate = self;
     [self addSubview:self.scrollView];
 
     self.contentView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, contentWidth, 0)];
     [self.scrollView addSubview:self.contentView];
+
+    // ── Footer ───────────────────────────────────────────────────────────────
+    self.footerLabel = [[UILabel alloc] initWithFrame:CGRectMake(contentStartX, CGRectGetHeight(self.bounds) - 30, contentWidth, 25)];
+    self.footerLabel.textAlignment = NSTextAlignmentCenter;
+    self.footerLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.22];
+    self.footerLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
+    self.footerLabel.text = @"◈ Hoang Xuan Tu • Mod Menu";
+    [self addSubview:self.footerLabel];
 }
 
-// =========================================================================
-// METHOD IMPLEMENTATIONS (ตาม .h)
-// =========================================================================
+// ─────────────────────────────────────────────────────────────────────────────
+#pragma mark - Screenshot-style helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-- (void)addTab:(NSArray<NSString *> *)tabNames {
-    CGFloat y = 15;
-    CGFloat btnSize = 50;
+/// Applies the orange/brown colour scheme from the screenshot.
+- (void)applyScreenshotStyleColours {
+    self.accentColor = kAccentOrange;
+    self.backgroundColor = kBgDark;
+    self.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.09].CGColor;
+    self.alpha = 1.0;
+    self.blurEffectView.hidden = YES;   // solid dark bg, no blur needed
+    [self setMenuAccentColor:kAccentOrange];
+}
 
-    for (NSInteger i = 0; i < tabNames.count; i++) {
-        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-        btn.frame = CGRectMake((75 - btnSize) / 2.0, y, btnSize, btnSize);
-        btn.layer.cornerRadius = 15;
-        btn.tag = i;
+/// Adds the Download and Moon (theme toggle) buttons that appear in the screenshot
+/// between the pill and the close button.
+- (void)buildScreenshotHeaderButtons {
+    CGFloat sidebarWidth  = 76;
+    CGFloat contentStartX = sidebarWidth + 12;
+    CGFloat titleY        = 16;
+    CGFloat pillHeight    = 42;
+    CGFloat buttonSize    = 38;
+    CGFloat buttonY       = titleY + (pillHeight - buttonSize) / 2.0;
 
-        if (@available(iOS 13.0, *)) {
-            UIImage *img = [UIImage systemImageNamed:@"star.fill"];
-            [btn setImage:img forState:UIControlStateNormal];
-            [btn setTintColor:COLOR_TEXT_DIM];
-        } else {
-            [btn setTitle:[NSString stringWithFormat:@"%ld", (long)i+1] forState:UIControlStateNormal];
-        }
+    // Reposition close button (rightmost slot)
+    self.closeButton.frame = CGRectMake(CGRectGetWidth(self.bounds) - buttonSize - 14, buttonY, buttonSize, buttonSize);
 
-        [btn addTarget:self action:@selector(tabButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [self.tabScrollView addSubview:btn];
-        [self.tabButtons addObject:btn];
-
-        UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.scrollView.frame.size.width, 0)];
-        container.hidden = (i != 0);
-        [self.contentView addSubview:container];
-        [self.internalContainers addObject:container];
-
-        y += btnSize + 12;
+    // Moon / theme-toggle button (second from right)
+    self.themeButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.themeButton.frame = CGRectMake(CGRectGetWidth(self.bounds) - (buttonSize + 14) * 2, buttonY, buttonSize, buttonSize);
+    self.themeButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.08];
+    self.themeButton.layer.cornerRadius = 12.0;
+    if (@available(iOS 13.0, *)) {
+        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightSemibold];
+        [self.themeButton setImage:[[UIImage systemImageNamed:@"moon.fill" withConfiguration:cfg]
+                                    imageWithTintColor:kAccentOrange renderingMode:UIImageRenderingModeAlwaysOriginal]
+                          forState:UIControlStateNormal];
     }
-    self.tabScrollView.contentSize = CGSizeMake(75, y);
-    [self setTabIndex:0];
-}
+    [self addSubview:self.themeButton];
 
-- (void)setTabIndex:(NSInteger)index {
-    self.selectedTabIndex = index;
-    if (index >= self.internalContainers.count) return;
-
-    for (NSUInteger i = 0; i < self.tabButtons.count; i++) {
-        UIButton *btn = self.tabButtons[i];
-        BOOL selected = (i == index);
-        btn.backgroundColor = selected ? [COLOR_ACCENT_GOLD colorWithAlphaComponent:0.3] : [UIColor clearColor];
-        [btn setTintColor:selected ? COLOR_ACCENT_GOLD : COLOR_TEXT_DIM];
+    // Download button (third from right)
+    self.downloadButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    self.downloadButton.frame = CGRectMake(CGRectGetWidth(self.bounds) - (buttonSize + 14) * 3, buttonY, buttonSize, buttonSize);
+    self.downloadButton.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.08];
+    self.downloadButton.layer.cornerRadius = 12.0;
+    if (@available(iOS 13.0, *)) {
+        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightSemibold];
+        [self.downloadButton setImage:[[UIImage systemImageNamed:@"square.and.arrow.down" withConfiguration:cfg]
+                                       imageWithTintColor:kAccentOrange renderingMode:UIImageRenderingModeAlwaysOriginal]
+                             forState:UIControlStateNormal];
     }
+    [self addSubview:self.downloadButton];
 
-    for (NSUInteger i = 0; i < self.internalContainers.count; i++) {
-        self.internalContainers[i].hidden = (i != index);
-    }
-
-    self.contentHeight = 0;
-    self.contentView.frame = CGRectMake(0, 0, self.contentView.frame.size.width, 0);
-    self.scrollView.contentSize = CGSizeMake(self.scrollView.frame.size.width, 0);
+    // Extend pill width so it doesn't overlap the extra buttons
+    CGRect pillFrame = self.pillView.frame;
+    CGFloat maxPillRight = self.downloadButton.frame.origin.x - 10;
+    pillFrame.size.width = MIN(pillFrame.size.width, maxPillRight - pillFrame.origin.x);
+    self.pillView.frame = pillFrame;
+    self.tabTitleLabel.frame = CGRectMake(40, 0, pillFrame.size.width - 48, pillHeight);
 }
 
-- (void)addFeatureSwitch:(NSString *)title description:(NSString *)desc isOn:(BOOL)isOn handler:(MenuSwitchHandler)handler {
-    CGFloat width = self.scrollView.frame.size.width;
-    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, (desc.length > 0) ? 70 : 55)];
-    row.backgroundColor = COLOR_BG_ROW;
-    row.layer.cornerRadius = 15;
-    row.layer.borderWidth = 1.0;
-    row.layer.borderColor = COLOR_BORDER.CGColor;
+// ─────────────────────────────────────────────────────────────────────────────
+#pragma mark - Public API
+// ─────────────────────────────────────────────────────────────────────────────
 
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(15, 12, width - 60, 20)];
-    lbl.text = title;
-    lbl.textColor = COLOR_TEXT_MAIN;
-    lbl.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-    [row addSubview:lbl];
-
-    if (desc.length > 0) {
-        UILabel *dLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 32, width - 60, 20)];
-        dLabel.text = desc;
-        dLabel.textColor = COLOR_TEXT_DIM;
-        dLabel.font = [UIFont systemFontOfSize:12];
-        [row addSubview:dLabel];
-    }
-
-    UIButton *toggle = [UIButton buttonWithType:UIButtonTypeCustom];
-    toggle.frame = CGRectMake(width - 40, (row.frame.size.height - 25) / 2, 25, 25);
-    toggle.layer.cornerRadius = 12.5;
-    toggle.layer.borderWidth = 2.0;
-
-    if (isOn) {
-        toggle.backgroundColor = COLOR_ACCENT_GOLD;
-        toggle.layer.borderColor = COLOR_ACCENT_GOLD.CGColor;
-    } else {
-        toggle.backgroundColor = [UIColor clearColor];
-        toggle.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.2].CGColor;
-    }
-
-    objc_setAssociatedObject(toggle, "switchHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    objc_setAssociatedObject(toggle, "state", @(isOn), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [toggle addTarget:self action:@selector(customToggleTapped:) forControlEvents:UIControlEventTouchUpInside];
-    [row addSubview:toggle];
-
-    [self addControlView:row height:row.frame.size.height];
+- (void)setMenuTitle:(NSString *)title {
+    self.titleLabel.text = title;
 }
 
-- (void)addFeatureSwitch:(NSString *)title {
-    [self addFeatureSwitch:title description:@"" isOn:NO handler:nil];
+- (void)setMenuSubtitle:(NSString *)subtitle {
+    self.subtitleLabel.text = subtitle;
 }
 
-- (void)addSlider:(NSString *)title min:(CGFloat)min max:(CGFloat)max value:(CGFloat)value handler:(MenuSliderHandler)handler {
-    CGFloat width = self.scrollView.frame.size.width;
-    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 80)];
-    row.backgroundColor = COLOR_BG_ROW;
-    row.layer.cornerRadius = 15;
-    row.layer.borderWidth = 1.0;
-    row.layer.borderColor = COLOR_BORDER.CGColor;
-
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(15, 12, width - 80, 20)];
-    lbl.text = title;
-    lbl.textColor = COLOR_TEXT_MAIN;
-    lbl.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-    [row addSubview:lbl];
-
-    UILabel *valLbl = [[UILabel alloc] initWithFrame:CGRectMake(width - 60, 12, 45, 20)];
-    valLbl.text = [NSString stringWithFormat:@"%.1f", value];
-    valLbl.textColor = COLOR_ACCENT_GOLD;
-    valLbl.textAlignment = NSTextAlignmentRight;
-    valLbl.font = [UIFont monospacedDigitSystemFontOfSize:14 weight:UIFontWeightBold];
-    [row addSubview:valLbl];
-
-    UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(15, 40, width - 30, 25)];
-    slider.minimumValue = min;
-    slider.maximumValue = max;
-    slider.value = value;
-    slider.minimumTrackTintColor = COLOR_ACCENT_GOLD;
-    slider.maximumTrackTintColor = [COLOR_ACCENT_GOLD colorWithAlphaComponent:0.3];
-    [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
-    objc_setAssociatedObject(slider, "sliderHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    objc_setAssociatedObject(slider, "valLabel", valLbl, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [row addSubview:slider];
-
-    [self addControlView:row height:80];
-}
-
-- (void)addSlider:(NSString *)title max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(void (^)(CGFloat value))handler {
-    [self addSlider:title min:min max:max value:value handler:handler];
-}
-
-- (void)addButton:(NSString *)title withHandler:(MenuButtonHandler)handler {
-    CGFloat width = self.scrollView.frame.size.width;
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-    btn.frame = CGRectMake(0, 0, width, 50);
-    btn.backgroundColor = [COLOR_ACCENT_GOLD colorWithAlphaComponent:0.8];
-    [btn setTitle:title forState:UIControlStateNormal];
-    [btn setTitleColor:COLOR_TEXT_MAIN forState:UIControlStateNormal];
-    btn.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightBold];
-    btn.layer.cornerRadius = 15;
-    objc_setAssociatedObject(btn, "btnHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    [btn addTarget:self action:@selector(buttonTapped:) forControlEvents:UIControlEventTouchUpInside];
-    [self addControlView:btn height:50];
-}
-
-- (void)addComboSelector:(NSString *)title options:(NSArray *)options selectedIndex:(NSInteger)index handler:(MenuComboHandler)handler {
-    CGFloat width = self.scrollView.frame.size.width;
-    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 70)];
-    row.backgroundColor = COLOR_BG_ROW;
-    row.layer.cornerRadius = 15;
-    row.layer.borderWidth = 1.0;
-    row.layer.borderColor = COLOR_BORDER.CGColor;
-
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(15, 12, width - 30, 20)];
-    lbl.text = title;
-    lbl.textColor = COLOR_TEXT_DIM;
-    lbl.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    [row addSubview:lbl];
-
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-    btn.frame = CGRectMake(15, 35, width - 30, 30);
-    [btn setTitle:options[index] forState:UIControlStateNormal];
-    [btn setTitleColor:COLOR_TEXT_MAIN forState:UIControlStateNormal];
-    btn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-    objc_setAssociatedObject(btn, "comboOptions", options, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(btn, "comboHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    [btn addTarget:self action:@selector(comboTapped:) forControlEvents:UIControlEventTouchUpInside];
-    [row addSubview:btn];
-
-    [self addControlView:row height:70];
-}
-
-- (void)addTextField:(NSString *)title placeholder:(NSString *)placeholder handler:(MenuTextFieldHandler)handler {
-    CGFloat width = self.scrollView.frame.size.width;
-    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 80)];
-    row.backgroundColor = COLOR_BG_ROW;
-    row.layer.cornerRadius = 15;
-    row.layer.borderWidth = 1.0;
-    row.layer.borderColor = COLOR_BORDER.CGColor;
-
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(15, 12, width - 30, 20)];
-    lbl.text = title;
-    lbl.textColor = COLOR_TEXT_DIM;
-    lbl.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    [row addSubview:lbl];
-
-    UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(15, 35, width - 30, 30)];
-    tf.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.3];
-    tf.textColor = [UIColor whiteColor];
-    tf.placeholder = placeholder;
-    tf.layer.cornerRadius = 8;
-    tf.borderStyle = UITextBorderStyleNone;
-    tf.delegate = self;
-    objc_setAssociatedObject(tf, "tfHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    [tf addTarget:self action:@selector(textFieldEdited:) forControlEvents:UIControlEventEditingChanged];
-    [row addSubview:tf];
-
-    [self addControlView:row height:80];
-}
-
-- (void)addLabel:(NSString *)text {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, self.scrollView.frame.size.width, 30)];
-    lbl.text = text;
-    lbl.textColor = COLOR_TEXT_MAIN;
-    lbl.textAlignment = NSTextAlignmentCenter;
-    [self addControlView:lbl height:30];
-}
-
-- (void)addSectionTitle:(NSString *)title {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, self.scrollView.frame.size.width, 30)];
-    lbl.text = [title uppercaseString];
-    lbl.textColor = COLOR_TEXT_DIM;
-    lbl.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
-    lbl.textAlignment = NSTextAlignmentLeft;
-    [self addControlView:lbl height:30];
-}
-
-- (void)addThemeSlider:(NSString *)title property:(NSString *)prop max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(MenuSliderHandler)handler {
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Warc-retain-cycles"
-    [self addSlider:title min:min max:max value:value handler:^(CGFloat val) {
-        if ([prop isEqualToString:@"corner"]) self.layer.cornerRadius = val;
-        if (handler) handler(val);
-    }];
-    #pragma clang diagnostic pop
+- (void)setFooterText:(NSString *)text {
+    self.footerLabel.text = text;
 }
 
 - (void)makeDraggable {
@@ -349,106 +304,800 @@
     self.canMove = YES;
 }
 
-- (void)canMove:(BOOL)enabled {
-    self.canMove = enabled;
-    if (self.panGesture) self.panGesture.enabled = enabled;
+- (void)setMenuGlassEffect:(BOOL)enabled {
+    self.blurEffectView.hidden = !enabled;
+}
+
+- (void)customizeScrollIndicator {
+    self.tabScrollView.indicatorStyle = UIScrollViewIndicatorStyleWhite;
+    if (@available(iOS 13.0, *)) {
+        self.tabScrollView.verticalScrollIndicatorInsets = UIEdgeInsetsMake(0, 0, 0, -4);
+    }
+}
+
+- (void)canMove:(BOOL)canMove {
+    if (canMove && self.gestureRecognizers.count == 0) {
+        UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        [self addGestureRecognizer:pan];
+    }
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    if (!self.canMove) return;
+    // Locked-size menus stay draggable but won't resize
     CGPoint translation = [gesture translationInView:self.superview];
-    if (gesture.state == UIGestureRecognizerStateChanged) {
-        self.center = CGPointMake(self.center.x + translation.x, self.center.y + translation.y);
+    if (gesture.state == UIGestureRecognizerStateChanged || gesture.state == UIGestureRecognizerStateEnded) {
+        CGRect frame = self.frame;
+        frame.origin.x += translation.x;
+        frame.origin.y += translation.y;
+        // Keep the locked size intact
+        if (self.screenshotStyle) {
+            frame.size = CGSizeMake(kMenuWidth, kMenuHeight);
+        }
+        self.frame = frame;
         [gesture setTranslation:CGPointZero inView:self.superview];
     }
 }
 
-- (void)updateLayout {
-    [self setNeedsLayout];
+// ─────────────────────────────────────────────────────────────────────────────
+#pragma mark - Tabs
+// ─────────────────────────────────────────────────────────────────────────────
+
+- (void)addTab:(NSArray<NSString *> *)titles {
+    for (UIButton *button in self.tabButtons) [button removeFromSuperview];
+    [self.tabButtons removeAllObjects];
+    [self.tabContainers makeObjectsPerformSelector:@selector(removeFromSuperview)];
+    [self.tabContainers removeAllObjects];
+    [self.tabHeights removeAllObjects];
+
+    self.tabTitles = [titles copy];
+
+    // Icon map: screenshot uses eye, scope, gamepad, gear, sliders
+    NSDictionary<NSString *, NSString *> *iconMap = @{
+        @"esp":      @"eye",
+        @"aimbot":   @"scope",
+        @"cheats":   @"gamecontroller",
+        @"memory":   @"cube.box",
+        @"settings": @"gearshape",
+        @"sliders":  @"slider.horizontal.3",
+        @"info":     @"info.circle",
+        @"hammer":   @"hammer"
+    };
+
+    CGFloat sidebarWidth  = CGRectGetWidth(self.tabSidebar.bounds);
+    CGFloat tabButtonSize = 48.0;
+    CGFloat tabSpacing    = 10.0;
+    CGFloat y             = 18.0;
+    CGFloat buttonX       = (sidebarWidth - tabButtonSize) / 2.0;
+
+    for (NSUInteger i = 0; i < titles.count; i++) {
+        NSString *tabName  = titles[i];
+        UIButton *tabButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        tabButton.frame = CGRectMake(buttonX, y, tabButtonSize, tabButtonSize);
+        tabButton.layer.cornerRadius = 14.0;
+        tabButton.layer.borderWidth  = 1.0;
+        tabButton.layer.borderColor  = [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
+        tabButton.backgroundColor    = [UIColor clearColor];
+        tabButton.tintColor          = [UIColor colorWithWhite:1.0 alpha:0.45];
+        tabButton.imageView.contentMode = UIViewContentModeScaleAspectFit;
+        tabButton.adjustsImageWhenHighlighted = NO;
+
+        NSString *symbolName = iconMap[[tabName lowercaseString]] ?: @"star";
+        UIImage *iconImage   = nil;
+        if (@available(iOS 13.0, *)) {
+            UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightMedium];
+            iconImage = [[UIImage systemImageNamed:symbolName withConfiguration:cfg]
+                         imageWithTintColor:[UIColor colorWithWhite:1.0 alpha:0.45]
+                         renderingMode:UIImageRenderingModeAlwaysOriginal];
+            if (iconImage) {
+                [tabButton setImage:iconImage forState:UIControlStateNormal];
+                tabButton.imageEdgeInsets = UIEdgeInsetsMake(10, 10, 10, 10);
+            }
+        }
+        if (!iconImage) {
+            [tabButton setTitle:[tabName uppercaseString] forState:UIControlStateNormal];
+            tabButton.titleLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightSemibold];
+            [tabButton setTitleColor:[UIColor colorWithWhite:1.0 alpha:0.45] forState:UIControlStateNormal];
+        }
+
+        tabButton.tag = i;
+        [tabButton addTarget:self action:@selector(tabButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [self.tabScrollView addSubview:tabButton];
+        [self.tabButtons addObject:tabButton];
+
+        UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.scrollView.bounds), 8)];
+        container.backgroundColor = [UIColor clearColor];
+        container.hidden = (i != 0);
+        [self.contentView addSubview:container];
+        [self.tabContainers addObject:container];
+        [self.tabHeights addObject:@(8)];
+
+        y += tabButtonSize + tabSpacing;
+    }
+
+    self.tabScrollView.contentSize = CGSizeMake(sidebarWidth, y);
+    if (self.tabButtons.count > 0) [self setTabIndex:0];
 }
 
-- (void)setMenuAccentColor:(UIColor *)color { self.accentColor = color; }
-- (void)setMenuGlassEffect:(BOOL)enabled { }
-- (void)setMenuCornerRadius:(CGFloat)radius { self.layer.cornerRadius = radius; }
-- (void)setMenuBorderWidth:(CGFloat)width { self.layer.borderWidth = width; }
-- (void)setMenuTitle:(NSString *)title { self.tabTitleLabel.text = title; }
-- (void)setMenuSubtitle:(NSString *)subtitle { }
-- (void)setFooterText:(NSString *)text { }
+- (void)setTabIndex:(NSInteger)index {
+    if (index < 0 || index >= (NSInteger)self.tabContainers.count) return;
+    self.currentTabIndex  = index;
+    self.selectedTabIndex = index;
 
-- (void)closeMenu {
-    [self removeFromSuperview];
+    UIColor *activeIcon   = self.screenshotStyle ? kAccentOrange : [UIColor whiteColor];
+    UIColor *inactiveIcon = [UIColor colorWithWhite:1.0 alpha:0.45];
+
+    for (NSUInteger i = 0; i < self.tabButtons.count; i++) {
+        UIButton *button  = self.tabButtons[i];
+        BOOL selected     = (button.tag == index);
+        UIColor *iconTint = selected ? activeIcon : inactiveIcon;
+        button.backgroundColor = selected
+            ? (self.screenshotStyle ? kAccentOrangeDim : [self.accentColor colorWithAlphaComponent:0.22])
+            : [UIColor clearColor];
+        button.layer.borderColor = selected
+            ? self.accentColor.CGColor
+            : [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
+        button.layer.borderWidth = selected ? 1.5 : 1.0;
+        if (@available(iOS 13.0, *)) {
+            UIImage *img = button.imageView.image;
+            if (img) {
+                [button setImage:[img imageWithTintColor:iconTint renderingMode:UIImageRenderingModeAlwaysOriginal]
+                        forState:UIControlStateNormal];
+            }
+        }
+    }
+
+    NSString *tabName    = self.tabTitles[index];
+    UIColor  *pillTint   = self.screenshotStyle ? kAccentOrange : [UIColor whiteColor];
+    self.tabTitleLabel.text      = [tabName uppercaseString];
+    self.tabTitleLabel.textColor = pillTint;
+
+    NSDictionary<NSString *, NSString *> *iconMap = @{
+        @"esp":      @"eye",
+        @"aimbot":   @"scope",
+        @"cheats":   @"gamecontroller",
+        @"memory":   @"cube.box",
+        @"settings": @"gearshape",
+        @"sliders":  @"slider.horizontal.3",
+        @"info":     @"info.circle"
+    };
+    NSString *symbolName = iconMap[[tabName lowercaseString]] ?: @"star";
+    if (@available(iOS 13.0, *)) {
+        UIImageSymbolConfiguration *iconConfig = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
+        self.pillIcon.image = [[UIImage systemImageNamed:symbolName withConfiguration:iconConfig]
+                               imageWithTintColor:self.screenshotStyle ? kAccentOrange : self.accentColor
+                               renderingMode:UIImageRenderingModeAlwaysOriginal];
+    }
+
+    for (NSUInteger i = 0; i < self.tabContainers.count; i++) {
+        self.tabContainers[i].hidden = (i != (NSUInteger)index);
+    }
+
+    self.contentHeight = [self.tabHeights[index] floatValue];
+    self.contentView.frame = CGRectMake(0, 0, CGRectGetWidth(self.scrollView.bounds), self.contentHeight);
+    self.scrollView.contentSize = CGSizeMake(CGRectGetWidth(self.scrollView.bounds), self.contentHeight);
 }
 
-// =========================================================================
-// INTERNAL HELPERS
-// =========================================================================
-
-- (void)addControlView:(UIView *)view height:(CGFloat)height {
-    if (self.selectedTabIndex >= self.internalContainers.count) return;
-
-    UIView *container = self.internalContainers[self.selectedTabIndex];
-    CGFloat width = CGRectGetWidth(self.scrollView.bounds);
-    view.frame = CGRectMake(0, self.contentHeight, width, height);
-    [container addSubview:view];
-
-    self.contentHeight += height + 10;
-    container.frame = CGRectMake(0, 0, width, self.contentHeight);
-    self.contentView.frame = CGRectMake(0, 0, width, self.contentHeight);
-    self.scrollView.contentSize = CGSizeMake(width, self.contentHeight);
+- (UIView *)activeContentContainer {
+    if (self.currentTabIndex >= 0 && self.currentTabIndex < (NSInteger)self.tabContainers.count) {
+        return self.tabContainers[self.currentTabIndex];
+    }
+    return self.contentView;
 }
 
 - (void)tabButtonTapped:(UIButton *)sender {
     [self setTabIndex:sender.tag];
 }
 
-- (void)customToggleTapped:(UIButton *)sender {
-    BOOL state = [objc_getAssociatedObject(sender, "state") boolValue];
-    state = !state;
-    objc_setAssociatedObject(sender, "state", @(state), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+- (void)closeButtonTapped:(UIButton *)sender {
+    [self closeMenu];
+}
 
-    [UIView animateWithDuration:0.2 animations:^{
-        if (state) {
-            sender.backgroundColor = COLOR_ACCENT_GOLD;
-            sender.layer.borderColor = COLOR_ACCENT_GOLD.CGColor;
-        } else {
-            sender.backgroundColor = [UIColor clearColor];
-            sender.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.2].CGColor;
+// ─────────────────────────────────────────────────────────────────────────────
+#pragma mark - Controls
+// ─────────────────────────────────────────────────────────────────────────────
+
+- (void)addSectionTitle:(NSString *)title {
+    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.scrollView.bounds) - 32, 48)];
+    box.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.05];
+    box.layer.cornerRadius = 18;
+    box.layer.borderWidth  = 1.0;
+    box.layer.borderColor  = [[UIColor whiteColor] colorWithAlphaComponent:0.08].CGColor;
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 14, CGRectGetWidth(box.bounds) - 32, 18)];
+    titleLabel.text      = [title uppercaseString];
+    titleLabel.font      = [UIFont systemFontOfSize:11 weight:UIFontWeightSemibold];
+    titleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.68];
+    [box addSubview:titleLabel];
+
+    [self addControlView:box height:CGRectGetHeight(box.bounds)];
+}
+
+/// Screenshot-style switch row: full-width rounded dark-brown card with orange toggle.
+- (void)addFeatureSwitch:(NSString *)title description:(NSString *)desc isOn:(BOOL)isOn handler:(MenuSwitchHandler)handler {
+    CGFloat contentWidth = self.scrollView.frame.size.width;
+
+    if (self.screenshotStyle) {
+        // ── Screenshot-clone row ─────────────────────────────────────────────
+        CGFloat rowHeight = (desc && desc.length > 0) ? 62 : 46;
+        UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, contentWidth - 24, rowHeight)];
+        container.backgroundColor = kBgRow;
+        container.layer.cornerRadius = 14.0;
+        container.layer.borderWidth  = 1.0;
+        container.layer.borderColor  = kBorderWeak.CGColor;
+
+        UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(16, 0, container.frame.size.width - 80, rowHeight)];
+        label.text      = title;
+        label.textColor = [UIColor whiteColor];
+        label.font      = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
+        label.numberOfLines = 1;
+        [container addSubview:label];
+
+        if (desc && desc.length > 0) {
+            label.frame = CGRectMake(16, 10, container.frame.size.width - 80, 22);
+            UILabel *hintLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, CGRectGetMaxY(label.frame) + 2, container.frame.size.width - 80, 18)];
+            hintLabel.text      = desc;
+            hintLabel.textColor = kAccentOrange;
+            hintLabel.font      = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+            [container addSubview:hintLabel];
         }
-    }];
 
-    MenuSwitchHandler handler = objc_getAssociatedObject(sender, "switchHandler");
-    if (handler) handler(state);
+        CGFloat switchWidth  = 46;
+        CGFloat switchHeight = 26;
+        CGFloat switchX      = container.frame.size.width - switchWidth - 14;
+        CGFloat switchY      = (rowHeight - switchHeight) / 2.0;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectMake(switchX, switchY, switchWidth, switchHeight)];
+        toggle.transform   = CGAffineTransformMakeScale(0.85, 0.85);
+        toggle.onTintColor = kAccentOrange;
+        toggle.on          = isOn;
+        [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+        objc_setAssociatedObject(toggle, "switchHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        [container addSubview:toggle];
+
+        [self addControlView:container height:rowHeight];
+        self.switches[title] = toggle;
+
+    } else {
+        // ── Original dark-blue style row ─────────────────────────────────────
+        UIView *container = [[UIView alloc] initWithFrame:CGRectMake(16, 0, contentWidth - 32, 48)];
+        container.tag = self.currentCategoryCounter + 1000;
+        container.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.05];
+        container.layer.cornerRadius = 12.0;
+        container.layer.borderWidth  = 1.0;
+        container.layer.borderColor  = [UIColor colorWithWhite:1.0 alpha:0.08].CGColor;
+
+        UIView *verticalBar = [[UIView alloc] initWithFrame:CGRectMake(0, 10, 3, container.frame.size.height - 20)];
+        verticalBar.backgroundColor = self.accentColor;
+        verticalBar.layer.cornerRadius = 1.5;
+        verticalBar.tag = 9997;
+        [container addSubview:verticalBar];
+
+        CGFloat labelHeight = 18;
+        UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(14, 7, container.frame.size.width - 92, labelHeight)];
+        label.text      = title;
+        label.textColor = [UIColor whiteColor];
+        label.font      = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+        [container addSubview:label];
+
+        UILabel *descLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 7 + labelHeight, container.frame.size.width - 92, 14)];
+        descLabel.text      = desc;
+        descLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.42];
+        descLabel.font      = [UIFont systemFontOfSize:8.5 weight:UIFontWeightRegular];
+        [container addSubview:descLabel];
+
+        CGFloat switchWidth  = 51 * 0.8;
+        CGFloat switchHeight = 31 * 0.8;
+        CGFloat switchY      = (container.frame.size.height - switchHeight) / 2.0;
+        UISwitch *toggle = [[UISwitch alloc] initWithFrame:CGRectMake(container.frame.size.width - switchWidth - 16, switchY, switchWidth, switchHeight)];
+        toggle.transform   = CGAffineTransformMakeScale(0.8, 0.8);
+        toggle.onTintColor = self.accentColor;
+        toggle.on          = isOn;
+        [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
+        objc_setAssociatedObject(toggle, "switchHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        [container addSubview:toggle];
+
+        [self addControlView:container height:CGRectGetHeight(container.bounds)];
+        self.switches[title] = toggle;
+    }
 }
 
-- (void)sliderChanged:(UISlider *)sender {
-    UILabel *valLbl = objc_getAssociatedObject(sender, "valLabel");
-    if (valLbl) valLbl.text = [NSString stringWithFormat:@"%.1f", sender.value];
-    MenuSliderHandler handler = objc_getAssociatedObject(sender, "sliderHandler");
-    if (handler) handler(sender.value);
+- (void)addFeatureSwitch:(NSString *)title {
+    [self addFeatureSwitch:title description:@"" isOn:NO handler:nil];
 }
 
-- (void)textFieldEdited:(UITextField *)sender {
-    MenuTextFieldHandler handler = objc_getAssociatedObject(sender, "tfHandler");
-    if (handler) handler(sender.text);
+- (void)addSlider:(NSString *)title min:(CGFloat)min max:(CGFloat)max value:(CGFloat)value handler:(MenuSliderHandler)handler {
+    [self addSlider:title max:max min:min value:value handler:handler];
 }
 
-- (void)buttonTapped:(UIButton *)sender {
-    MenuButtonHandler handler = objc_getAssociatedObject(sender, "btnHandler");
-    if (handler) handler();
+- (void)addSlider:(NSString *)title max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(void (^)(CGFloat value))handler {
+    CGFloat contentWidth = self.scrollView.frame.size.width;
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(16, 0, contentWidth - 32, 48)];
+    container.tag = self.currentCategoryCounter + 1000;
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, container.frame.size.width - 80, 16)];
+    titleLabel.text      = title;
+    titleLabel.textColor = [UIColor whiteColor];
+    titleLabel.font      = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    [container addSubview:titleLabel];
+
+    UILabel *valueLabel = [[UILabel alloc] initWithFrame:CGRectMake(container.frame.size.width - 50, 0, 50, 16)];
+    valueLabel.textColor      = self.accentColor;
+    valueLabel.font           = [UIFont systemFontOfSize:10 weight:UIFontWeightBold];
+    valueLabel.textAlignment  = NSTextAlignmentRight;
+    valueLabel.text           = [NSString stringWithFormat:@"%.1f", value];
+    [container addSubview:valueLabel];
+
+    UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(0, 20, container.frame.size.width, 24)];
+    slider.minimumValue        = min;
+    slider.maximumValue        = max;
+    slider.value               = value;
+    slider.minimumTrackTintColor = self.accentColor;
+    UIImage *thumbImage = [self createSliderThumbImage];
+    [slider setThumbImage:thumbImage forState:UIControlStateNormal];
+    [slider setThumbImage:thumbImage forState:UIControlStateHighlighted];
+    [slider addTarget:self action:@selector(sliderValueChanged:) forControlEvents:UIControlEventValueChanged];
+    objc_setAssociatedObject(slider, "sliderHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(slider, "valueLabel",   valueLabel, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [container addSubview:slider];
+
+    [self addControlView:container height:CGRectGetHeight(container.bounds)];
+    self.sliders[title]      = slider;
+    self.sliderLabels[title] = valueLabel;
+}
+
+- (void)addButton:(NSString *)title withHandler:(void (^)(void))handler {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.backgroundColor = self.accentColor;
+    [button setTitle:[title uppercaseString] forState:UIControlStateNormal];
+    [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    button.titleLabel.font   = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+    button.layer.cornerRadius = 14.0;
+    button.layer.masksToBounds = YES;
+    objc_setAssociatedObject(button, "menuHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [button addTarget:self action:@selector(buttonTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [self addControlView:button height:46];
+}
+
+- (void)addTextField:(NSString *)title placeholder:(NSString *)placeholder handler:(MenuTextFieldHandler)handler {
+    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.scrollView.bounds) - 32, 90)];
+    box.backgroundColor     = [[UIColor whiteColor] colorWithAlphaComponent:0.05];
+    box.layer.cornerRadius  = 18.0;
+    box.layer.borderWidth   = 1.0;
+    box.layer.borderColor   = [[UIColor whiteColor] colorWithAlphaComponent:0.10].CGColor;
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 14, CGRectGetWidth(box.bounds) - 32, 18)];
+    titleLabel.text      = [title uppercaseString];
+    titleLabel.font      = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    titleLabel.textColor = [UIColor colorWithWhite:1.0 alpha:0.85];
+    [box addSubview:titleLabel];
+
+    UITextField *field = [[UITextField alloc] initWithFrame:CGRectMake(16, CGRectGetMaxY(titleLabel.frame) + 10, CGRectGetWidth(box.bounds) - 32, 38)];
+    field.backgroundColor      = [[UIColor whiteColor] colorWithAlphaComponent:0.08];
+    field.textColor            = [UIColor whiteColor];
+    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:placeholder
+                                                                    attributes:@{NSForegroundColorAttributeName:[UIColor colorWithWhite:1.0 alpha:0.5]}];
+    field.layer.cornerRadius   = 14.0;
+    field.layer.borderWidth    = 1.0;
+    field.layer.borderColor    = [[UIColor whiteColor] colorWithAlphaComponent:0.08].CGColor;
+    field.leftView             = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 0)];
+    field.leftViewMode         = UITextFieldViewModeAlways;
+    field.returnKeyType        = UIReturnKeyDone;
+    field.font                 = [UIFont systemFontOfSize:12];
+    field.delegate             = self;
+    objc_setAssociatedObject(field, "menuHandler", handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [box addSubview:field];
+
+    [self addControlView:box height:CGRectGetHeight(box.bounds)];
+}
+
+- (void)textFieldChanged:(UITextField *)sender {
+    MenuTextFieldHandler handler = objc_getAssociatedObject(sender, "menuHandler");
+    if (handler) handler(sender.text ?: @"");
+}
+
+- (void)addComboSelector:(NSString *)title options:(NSArray *)options selectedIndex:(NSInteger)selectedIndex handler:(MenuComboHandler)handler {
+    CGFloat contentWidth = self.scrollView.frame.size.width;
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(16, 0, contentWidth - 32, 56)];
+    container.tag = self.currentCategoryCounter + 1000;
+
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, container.frame.size.width, 16)];
+    titleLabel.text      = title;
+    titleLabel.textColor = [UIColor whiteColor];
+    titleLabel.font      = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    [container addSubview:titleLabel];
+
+    UIButton *comboBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    comboBtn.frame = CGRectMake(0, 20, container.frame.size.width, 32);
+    comboBtn.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.05];
+    comboBtn.layer.cornerRadius = self.layer.cornerRadius * 0.3;
+    comboBtn.layer.borderWidth  = 1.0;
+    comboBtn.layer.borderColor  = [UIColor colorWithWhite:1.0 alpha:0.1].CGColor;
+    [comboBtn setTitle:options[selectedIndex] forState:UIControlStateNormal];
+    [comboBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    comboBtn.titleLabel.font = [UIFont systemFontOfSize:10];
+    comboBtn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    comboBtn.titleEdgeInsets = UIEdgeInsetsMake(0, 12, 0, 0);
+
+    UIButton *arrowBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    arrowBtn.frame = CGRectMake(comboBtn.frame.size.width - 24, 0, 20, 32);
+    [arrowBtn setTitle:@"▶" forState:UIControlStateNormal];
+    [arrowBtn setTitleColor:[UIColor colorWithWhite:0.5 alpha:1.0] forState:UIControlStateNormal];
+    arrowBtn.titleLabel.font = [UIFont systemFontOfSize:11];
+    arrowBtn.tag = 8888;
+    [arrowBtn addTarget:self action:@selector(comboTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [comboBtn addSubview:arrowBtn];
+    [comboBtn addTarget:self action:@selector(comboTapped:) forControlEvents:UIControlEventTouchUpInside];
+
+    UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+    closeBtn.frame = CGRectMake(comboBtn.frame.size.width - 24, 0, 20, 32);
+    [closeBtn setTitle:@"⤬" forState:UIControlStateNormal];
+    [closeBtn setTitleColor:[UIColor colorWithRed:1.0 green:0.23 blue:0.19 alpha:1.0] forState:UIControlStateNormal];
+    closeBtn.titleLabel.font = [UIFont systemFontOfSize:15];
+    closeBtn.hidden = YES;
+    closeBtn.tag    = 8889;
+    [closeBtn addTarget:self action:@selector(comboCloseTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [comboBtn addSubview:closeBtn];
+
+    objc_setAssociatedObject(comboBtn, "comboOptions",       options,              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(comboBtn, "comboHandler",       handler,              OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(comboBtn, "comboSelectedIndex", @(selectedIndex),     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(comboBtn, "comboArrow",         arrowBtn,             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(comboBtn, "comboCloseBtn",      closeBtn,             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    [container addSubview:comboBtn];
+    [self addControlView:container height:CGRectGetHeight(container.bounds)];
+}
+
+- (void)comboChanged:(UISegmentedControl *)sender {
+    MenuComboHandler handler = objc_getAssociatedObject(sender, "menuHandler");
+    if (handler) handler(sender.selectedSegmentIndex);
 }
 
 - (void)comboTapped:(UIButton *)sender {
-    NSArray *options = objc_getAssociatedObject(sender, "comboOptions");
-    MenuComboHandler handler = objc_getAssociatedObject(sender, "comboHandler");
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Select" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSInteger i = 0; i < options.count; i++) {
-        [alert addAction:[UIAlertAction actionWithTitle:options[i] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [sender setTitle:options[i] forState:UIControlStateNormal];
-            if (handler) handler(i);
-        }]];
+    UIButton *comboBtn = nil;
+    if (objc_getAssociatedObject(sender, "comboOptions")) {
+        comboBtn = sender;
+    } else if ([sender.superview isKindOfClass:[UIButton class]]) {
+        comboBtn = (UIButton *)sender.superview;
     }
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [[UIApplication sharedApplication].keyWindow.rootViewController presentViewController:alert animated:YES completion:nil];
+    if (![comboBtn isKindOfClass:[UIButton class]]) return;
+
+    NSArray *options       = objc_getAssociatedObject(comboBtn, "comboOptions");
+    UIButton *arrow        = objc_getAssociatedObject(comboBtn, "comboArrow");
+    UIButton *closeBtn     = objc_getAssociatedObject(comboBtn, "comboCloseBtn");
+    UIView *existingDropdown = objc_getAssociatedObject(comboBtn, "comboDropdown");
+    if (existingDropdown && existingDropdown.superview) {
+        [self closeComboDropdown:comboBtn];
+        return;
+    }
+
+    [self closeAllComboDropdowns];
+    arrow.hidden    = YES;
+    closeBtn.hidden = NO;
+    closeBtn.alpha  = 1.0;
+
+    CGFloat dropdownWidth  = comboBtn.frame.size.width;
+    CGFloat itemHeight     = 32;
+    CGFloat maxHeight      = 160;
+    CGFloat dropdownHeight = MIN(options.count * itemHeight, maxHeight);
+
+    CGPoint containerPoint = [comboBtn convertPoint:CGPointMake(0, CGRectGetMaxY(comboBtn.frame)) toView:self];
+    UIView *dropdown = [[UIView alloc] initWithFrame:CGRectMake(containerPoint.x, containerPoint.y, dropdownWidth, dropdownHeight)];
+    dropdown.backgroundColor = [UIColor colorWithRed:12.0/255.0 green:12.0/255.0 blue:28.0/255.0 alpha:0.97];
+    dropdown.layer.cornerRadius = self.layer.cornerRadius * 0.3;
+    dropdown.layer.borderWidth  = 1.0;
+    dropdown.layer.borderColor  = [UIColor colorWithWhite:1.0 alpha:0.2].CGColor;
+    dropdown.layer.shadowColor  = [UIColor blackColor].CGColor;
+    dropdown.layer.shadowOffset = CGSizeMake(0, 4);
+    dropdown.layer.shadowOpacity = 0.3;
+    dropdown.layer.shadowRadius  = 8;
+    dropdown.tag = 7777;
+    self.scrollView.scrollEnabled = NO;
+
+    UIScrollView *scrollView = nil;
+    if (options.count > 5) {
+        scrollView = [[UIScrollView alloc] initWithFrame:dropdown.bounds];
+        scrollView.contentSize = CGSizeMake(dropdownWidth, options.count * itemHeight);
+        scrollView.showsVerticalScrollIndicator = YES;
+        scrollView.indicatorStyle = UIScrollViewIndicatorStyleWhite;
+        [dropdown addSubview:scrollView];
+    }
+
+    UIView *itemsContainer = scrollView ? scrollView : dropdown;
+    for (NSInteger i = 0; i < (NSInteger)options.count; i++) {
+        UIButton *optionBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+        optionBtn.frame = CGRectMake(0, i * itemHeight, dropdownWidth, itemHeight - 1);
+        [optionBtn setTitle:options[i] forState:UIControlStateNormal];
+        [optionBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        optionBtn.titleLabel.font = [UIFont systemFontOfSize:10];
+        optionBtn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+        optionBtn.titleEdgeInsets = UIEdgeInsetsMake(0, 12, 0, 0);
+        optionBtn.tag = i;
+
+        NSNumber *selectedIndex = objc_getAssociatedObject(comboBtn, "comboSelectedIndex");
+        optionBtn.backgroundColor = (selectedIndex && selectedIndex.integerValue == i)
+            ? [self.accentColor colorWithAlphaComponent:0.2]
+            : [UIColor clearColor];
+
+        [optionBtn addTarget:self action:@selector(comboOptionSelected:) forControlEvents:UIControlEventTouchUpInside];
+        [itemsContainer addSubview:optionBtn];
+
+        if (i < (NSInteger)options.count - 1) {
+            UIView *sep = [[UIView alloc] initWithFrame:CGRectMake(12, itemHeight - 1, dropdownWidth - 24, 1)];
+            sep.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.07];
+            [optionBtn addSubview:sep];
+        }
+    }
+
+    CGFloat maxY = CGRectGetMaxY(self.scrollView.frame);
+    if (dropdown.frame.origin.y + dropdownHeight > maxY) {
+        dropdown.frame = CGRectMake(containerPoint.x, containerPoint.y - dropdownHeight - comboBtn.frame.size.height, dropdownWidth, dropdownHeight);
+    }
+
+    [self addSubview:dropdown];
+    objc_setAssociatedObject(comboBtn, "comboDropdown", dropdown, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(dropdown, "comboButton",   comboBtn, OBJC_ASSOCIATION_ASSIGN);
+
+    dropdown.alpha     = 0;
+    dropdown.transform = CGAffineTransformMakeScale(0.95, 0.95);
+    [UIView animateWithDuration:0.2 animations:^{
+        dropdown.alpha     = 1.0;
+        dropdown.transform = CGAffineTransformIdentity;
+    }];
+
+    UITapGestureRecognizer *tapOutside = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(closeComboDropdownsOnTap:)];
+    tapOutside.cancelsTouchesInView = NO;
+    [self addGestureRecognizer:tapOutside];
+    objc_setAssociatedObject(dropdown, "tapOutsideGesture", tapOutside, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+- (void)comboCloseTapped:(UIButton *)sender {
+    UIButton *comboBtn = (UIButton *)sender.superview;
+    if (![comboBtn isKindOfClass:[UIButton class]]) return;
+    [self closeComboDropdown:comboBtn];
+}
+
+- (UIButton *)comboButtonForDropdown:(UIView *)dropdown inView:(UIView *)view {
+    for (UIView *subview in view.subviews) {
+        if ([subview isKindOfClass:[UIButton class]] && objc_getAssociatedObject((UIButton *)subview, "comboDropdown") == dropdown) {
+            return (UIButton *)subview;
+        }
+        UIButton *found = [self comboButtonForDropdown:dropdown inView:subview];
+        if (found) return found;
+    }
+    return nil;
+}
+
+- (void)comboOptionSelected:(UIButton *)optionBtn {
+    UIView *dropdown = optionBtn.superview;
+    while (dropdown && dropdown.tag != 7777) dropdown = dropdown.superview;
+    if (!dropdown) return;
+
+    UIButton *comboBtn = objc_getAssociatedObject(dropdown, "comboButton");
+    if (![comboBtn isKindOfClass:[UIButton class]]) {
+        comboBtn = [self comboButtonForDropdown:dropdown inView:self.contentView];
+    }
+    if (!comboBtn) return;
+
+    NSArray *options        = objc_getAssociatedObject(comboBtn, "comboOptions");
+    void (^handler)(NSInteger) = objc_getAssociatedObject(comboBtn, "comboHandler");
+    NSInteger selectedIndex = optionBtn.tag;
+    [comboBtn setTitle:options[selectedIndex] forState:UIControlStateNormal];
+    objc_setAssociatedObject(comboBtn, "comboSelectedIndex", @(selectedIndex), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (handler) handler(selectedIndex);
+    [self closeComboDropdown:comboBtn];
+}
+
+- (void)closeComboDropdown:(UIButton *)comboBtn {
+    UIView  *dropdown = objc_getAssociatedObject(comboBtn, "comboDropdown");
+    UIButton *arrow   = objc_getAssociatedObject(comboBtn, "comboArrow");
+    UIButton *closeBtn = objc_getAssociatedObject(comboBtn, "comboCloseBtn");
+    if (dropdown) {
+        UITapGestureRecognizer *tapGesture = objc_getAssociatedObject(dropdown, "tapOutsideGesture");
+        if (tapGesture) [self removeGestureRecognizer:tapGesture];
+        [UIView animateWithDuration:0.2 animations:^{
+            dropdown.alpha     = 0;
+            dropdown.transform = CGAffineTransformMakeScale(0.95, 0.95);
+        } completion:^(BOOL finished) { [dropdown removeFromSuperview]; }];
+        objc_setAssociatedObject(comboBtn, "comboDropdown", nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        self.scrollView.scrollEnabled = YES;
+    }
+    closeBtn.hidden = YES;
+    arrow.hidden    = NO;
+    arrow.alpha     = 1.0;
+}
+
+- (void)closeAllComboDropdowns {
+    for (UIView *subview in self.contentView.subviews) {
+        if ([subview isKindOfClass:[UIButton class]]) {
+            UIView *dd = objc_getAssociatedObject((UIButton *)subview, "comboDropdown");
+            if (dd && dd.superview) [self closeComboDropdown:(UIButton *)subview];
+        }
+        for (UIView *child in subview.subviews) {
+            if ([child isKindOfClass:[UIButton class]]) {
+                UIView *dd = objc_getAssociatedObject((UIButton *)child, "comboDropdown");
+                if (dd && dd.superview) [self closeComboDropdown:(UIButton *)child];
+            }
+        }
+    }
+}
+
+- (void)closeComboDropdownsOnTap:(UITapGestureRecognizer *)gesture {
+    CGPoint location   = [gesture locationInView:self];
+    BOOL tappedInDropdown = NO;
+    for (UIView *subview in self.subviews) {
+        if (subview.tag == 7777 && CGRectContainsPoint(subview.frame, location)) {
+            tappedInDropdown = YES;
+            break;
+        }
+    }
+    if (!tappedInDropdown) [self closeAllComboDropdowns];
+}
+
+- (void)addThemeSlider:(NSString *)title property:(NSString *)property max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(MenuSliderHandler)handler {
+    [self addSlider:title max:max min:min value:value handler:handler];
+    UISlider *slider = self.sliders[title];
+    if (slider) objc_setAssociatedObject(slider, "themeProp", property, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+- (void)addLabel:(NSString *)text {
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(self.scrollView.bounds) - 32, 24)];
+    container.backgroundColor = [UIColor clearColor];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(container.bounds), CGRectGetHeight(container.bounds))];
+    label.text      = text;
+    label.textColor = [UIColor colorWithWhite:1.0 alpha:0.82];
+    label.font      = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
+    label.numberOfLines = 0;
+    [container addSubview:label];
+    [self addControlView:container height:CGRectGetHeight(container.bounds)];
+}
+
+- (void)setMenuAccentColor:(UIColor *)color {
+    if (!color) return;
+    self.accentColor = color;
+    for (UIButton *button in self.tabButtons) {
+        BOOL selected = button.tag == self.selectedTabIndex;
+        button.backgroundColor  = selected ? [self.accentColor colorWithAlphaComponent:0.22] : [UIColor clearColor];
+        button.layer.borderColor = selected ? self.accentColor.CGColor : [UIColor colorWithWhite:1.0 alpha:0.10].CGColor;
+        button.layer.borderWidth = selected ? 1.5 : 1.0;
+    }
+    for (NSString *key in self.sliders) ((UISlider *)self.sliders[key]).minimumTrackTintColor = self.accentColor;
+    for (NSString *key in self.switches) ((UISwitch *)self.switches[key]).onTintColor = self.accentColor;
+}
+
+- (void)setMenuCornerRadius:(CGFloat)radius { self.layer.cornerRadius = radius; }
+- (void)setMenuBorderWidth:(CGFloat)borderWidth { self.layer.borderWidth = borderWidth; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+#pragma mark - Layout
+// ─────────────────────────────────────────────────────────────────────────────
+
+- (void)updateLayout {
+    // If locked to screenshot size, enforce it first
+    if (self.screenshotStyle) {
+        CGRect f = self.frame;
+        f.size   = CGSizeMake(kMenuWidth, kMenuHeight);
+        self.frame = f;
+        self.bounds = CGRectMake(0, 0, kMenuWidth, kMenuHeight);
+    }
+
+    CGFloat width         = CGRectGetWidth(self.bounds);
+    CGFloat sidebarWidth  = 76.0;
+    CGFloat headerHeight  = 78.0;
+    CGFloat leftPadding   = 12.0;
+    CGFloat contentStartX = leftPadding + sidebarWidth;
+    CGFloat contentWidth  = width - contentStartX - 16.0;
+
+    self.tabSidebar.frame       = CGRectMake(leftPadding, 12, sidebarWidth, CGRectGetHeight(self.bounds) - 24);
+    self.tabScrollView.frame    = self.tabSidebar.bounds;
+    self.tabContainerView.frame = CGRectMake(0, 0, sidebarWidth, CGRectGetHeight(self.tabContainerView.frame));
+
+    CGFloat pillWidth = self.screenshotStyle ? 178 : 178;
+    self.pillView.frame = CGRectMake(contentStartX + 16, 16, pillWidth, 42);
+
+    CGFloat btnSize  = 38;
+    CGFloat btnY     = 16 + (42 - btnSize) / 2.0;
+
+    if (self.screenshotStyle && self.downloadButton && self.themeButton) {
+        self.closeButton.frame    = CGRectMake(width - btnSize - 14, btnY, btnSize, btnSize);
+        self.themeButton.frame    = CGRectMake(width - (btnSize + 14) * 2, btnY, btnSize, btnSize);
+        self.downloadButton.frame = CGRectMake(width - (btnSize + 14) * 3, btnY, btnSize, btnSize);
+    } else {
+        self.closeButton.frame = CGRectMake(width - btnSize - 16, btnY, btnSize, btnSize);
+    }
+
+    self.subtitleLabel.frame = CGRectMake(contentStartX + 16, CGRectGetMaxY(self.pillView.frame) + 10, contentWidth - 32, 16);
+    self.scrollView.frame    = CGRectMake(contentStartX, headerHeight, contentWidth, CGRectGetHeight(self.bounds) - headerHeight - 28);
+    self.contentView.frame   = CGRectMake(0, 0, CGRectGetWidth(self.scrollView.bounds), self.contentHeight);
+    self.scrollView.contentSize = CGSizeMake(CGRectGetWidth(self.scrollView.bounds), self.contentHeight);
+    self.footerLabel.frame   = CGRectMake(contentStartX, CGRectGetHeight(self.bounds) - 30, contentWidth, 20);
+
+    for (UIView *container in self.tabContainers) {
+        CGRect fr   = container.frame;
+        fr.size.width = CGRectGetWidth(self.scrollView.bounds);
+        container.frame = fr;
+    }
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    [self updateLayout];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+#pragma mark - Internal helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+- (void)addControlView:(UIView *)view height:(CGFloat)height {
+    UIView *container = [self activeContentContainer];
+    CGFloat width     = CGRectGetWidth(self.scrollView.bounds);
+    CGFloat xOffset   = self.screenshotStyle ? 8 : 16;
+    view.frame = CGRectMake(xOffset, self.contentHeight, width - xOffset * 2, height);
+    [container addSubview:view];
+
+    self.contentHeight += height + (self.screenshotStyle ? 8 : 10);
+    container.frame         = CGRectMake(0, 0, width, self.contentHeight);
+    self.contentView.frame  = CGRectMake(0, 0, width, self.contentHeight);
+    self.scrollView.contentSize = CGSizeMake(width, self.contentHeight);
+
+    if (self.currentTabIndex >= 0 && self.currentTabIndex < (NSInteger)self.tabHeights.count) {
+        self.tabHeights[self.currentTabIndex] = @(self.contentHeight);
+    }
+}
+
+- (void)switchChanged:(UISwitch *)sender {
+    MenuSwitchHandler handler = objc_getAssociatedObject(sender, "menuHandler");
+    if (!handler) handler = objc_getAssociatedObject(sender, "switchHandler");
+    if (handler) handler(sender.on);
+}
+
+- (void)sliderValueChanged:(UISlider *)sender { [self sliderChanged:sender]; }
+
+- (void)sliderChanged:(UISlider *)sender {
+    UILabel *label = objc_getAssociatedObject(sender, "valueLabel");
+    if ([label isKindOfClass:[UILabel class]]) {
+        label.text = [NSString stringWithFormat:@"%.1f", sender.value];
+    }
+    MenuSliderHandler handler = objc_getAssociatedObject(sender, "menuHandler");
+    if (handler) handler(sender.value);
+    void (^sliderHandler)(CGFloat) = objc_getAssociatedObject(sender, "sliderHandler");
+    if (sliderHandler) sliderHandler(sender.value);
+
+    NSString *themeProp = objc_getAssociatedObject(sender, "themeProp");
+    if ([themeProp isEqualToString:@"opacity"])       self.alpha = sender.value;
+    else if ([themeProp isEqualToString:@"corner"])   [self setMenuCornerRadius:sender.value];
+    else if ([themeProp isEqualToString:@"border"])   [self setMenuBorderWidth:sender.value];
+}
+
+- (UIImage *)createSliderThumbImage {
+    CGFloat thumbSize = 12.0;
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(thumbSize, thumbSize), NO, 0.0);
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    CGContextSetFillColorWithColor(context, [UIColor whiteColor].CGColor);
+    CGContextFillEllipseInRect(context, CGRectMake(0, 0, thumbSize, thumbSize));
+    CGContextSetStrokeColorWithColor(context, [UIColor colorWithWhite:0.3 alpha:1.0].CGColor);
+    CGContextSetLineWidth(context, 0.5);
+    CGContextStrokeEllipseInRect(context, CGRectMake(0, 0, thumbSize, thumbSize));
+    UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return image;
+}
+
+- (void)buttonTapped:(UIButton *)sender {
+    void (^handler)(void) = objc_getAssociatedObject(sender, "menuHandler");
+    if (handler) handler();
+}
+
+- (void)closeMenu {
+    [UIView animateWithDuration:0.2 animations:^{ self.alpha = 0.0; }
+                     completion:^(BOOL finished) { [self removeFromSuperview]; }];
+}
+
+// UITextFieldDelegate
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    [textField resignFirstResponder];
+    MenuTextFieldHandler handler = objc_getAssociatedObject(textField, "menuHandler");
+    if (handler) handler(textField.text ?: @"");
+    return YES;
 }
 
 @end
