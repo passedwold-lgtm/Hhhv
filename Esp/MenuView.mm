@@ -3,16 +3,17 @@
 
 @interface MenuView ()
 @property (nonatomic, assign) CGFloat contentHeight;
+@property (nonatomic, strong) NSMutableArray<UIView *> *internalContainers;
 @end
 
 @implementation MenuView
 
 // =========================================================================
-// CONFIGURATION: สีตามรูปภาพ (ดำ-ทอง)
+// CONFIGURATION: สีดำ-ทอง ตามรูปภาพ
 // =========================================================================
-#define COLOR_BG_MAIN       [UIColor colorWithRed:0.12f green:0.08f blue:0.06f alpha:1.0] 
-#define COLOR_BG_ROW        [UIColor colorWithRed:0.18f green:0.13f blue:0.10f alpha:1.0] 
-#define COLOR_ACCENT_GOLD   [UIColor colorWithRed:1.00f green:0.71f blue:0.29f alpha:1.0] 
+#define COLOR_BG_MAIN       [UIColor colorWithRed:0.12f green:0.08f blue:0.06f alpha:1.0]
+#define COLOR_BG_ROW        [UIColor colorWithRed:0.18f green:0.13f blue:0.10f alpha:1.0]
+#define COLOR_ACCENT_GOLD   [UIColor colorWithRed:1.00f green:0.71f blue:0.29f alpha:1.0]
 #define COLOR_TEXT_MAIN     [UIColor whiteColor]
 #define COLOR_TEXT_DIM      [UIColor colorWithWhite:1.0 alpha:0.5]
 #define COLOR_BORDER        [UIColor colorWithWhite:1.0 alpha:0.1]
@@ -31,7 +32,9 @@
     self.buttons = [NSMutableDictionary dictionary];
     self.textFields = [NSMutableDictionary dictionary];
     self.tabButtons = [NSMutableArray array];
-    
+    self.internalContainers = [NSMutableArray array];
+    self.contentHeight = 0;
+
     // Main Window Setup
     self.backgroundColor = COLOR_BG_MAIN;
     self.layer.cornerRadius = 30.0;
@@ -39,6 +42,7 @@
     self.layer.borderWidth = 1.5;
     self.layer.borderColor = [COLOR_ACCENT_GOLD colorWithAlphaComponent:0.4].CGColor;
     self.accentColor = COLOR_ACCENT_GOLD;
+    self.canMove = NO;
 
     CGFloat sidebarWidth = 75;
     CGFloat headerHeight = 85;
@@ -110,15 +114,15 @@
         btn.frame = CGRectMake((75 - btnSize) / 2.0, y, btnSize, btnSize);
         btn.layer.cornerRadius = 15;
         btn.tag = i;
-        
+
         if (@available(iOS 13.0, *)) {
             UIImage *img = [UIImage systemImageNamed:@"star.fill"];
             [btn setImage:img forState:UIControlStateNormal];
-            btn.tintColor = COLOR_TEXT_DIM;
+            [btn setTintColor:COLOR_TEXT_DIM];
         } else {
             [btn setTitle:[NSString stringWithFormat:@"%ld", (long)i+1] forState:UIControlStateNormal];
         }
-        
+
         [btn addTarget:self action:@selector(tabButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self.tabScrollView addSubview:btn];
         [self.tabButtons addObject:btn];
@@ -126,14 +130,8 @@
         UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.scrollView.frame.size.width, 0)];
         container.hidden = (i != 0);
         [self.contentView addSubview:container];
-        
-        // We use a custom internal array to track containers since .h doesn't have it
-        NSMutableArray *containers = objc_getAssociatedObject(self, "internalContainers");
-        if (!containers) {
-            containers = [NSMutableArray array];
-            objc_setAssociatedObject(self, "internalContainers", containers, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        [containers addObject:container];
+        [self.internalContainers addObject:container];
+
         y += btnSize + 12;
     }
     self.tabScrollView.contentSize = CGSizeMake(75, y);
@@ -142,19 +140,22 @@
 
 - (void)setTabIndex:(NSInteger)index {
     self.selectedTabIndex = index;
-    NSMutableArray *containers = objc_getAssociatedObject(self, "internalContainers");
-    if (!containers || index >= containers.count) return;
+    if (index >= self.internalContainers.count) return;
 
     for (NSUInteger i = 0; i < self.tabButtons.count; i++) {
         UIButton *btn = self.tabButtons[i];
         BOOL selected = (i == index);
         btn.backgroundColor = selected ? [COLOR_ACCENT_GOLD colorWithAlphaComponent:0.3] : [UIColor clearColor];
-        btn.tintColor = selected ? COLOR_ACCENT_GOLD : COLOR_TEXT_DIM;
+        [btn setTintColor:selected ? COLOR_ACCENT_GOLD : COLOR_TEXT_DIM];
     }
 
-    for (NSUInteger i = 0; i < containers.count; i++) {
-      [(UIView *)containers[i] setHidden:(i != index)];
+    for (NSUInteger i = 0; i < self.internalContainers.count; i++) {
+        self.internalContainers[i].hidden = (i != index);
     }
+
+    self.contentHeight = 0;
+    self.contentView.frame = CGRectMake(0, 0, self.contentView.frame.size.width, 0);
+    self.scrollView.contentSize = CGSizeMake(self.scrollView.frame.size.width, 0);
 }
 
 - (void)addFeatureSwitch:(NSString *)title description:(NSString *)desc isOn:(BOOL)isOn handler:(MenuSwitchHandler)handler {
@@ -183,7 +184,7 @@
     toggle.frame = CGRectMake(width - 40, (row.frame.size.height - 25) / 2, 25, 25);
     toggle.layer.cornerRadius = 12.5;
     toggle.layer.borderWidth = 2.0;
-    
+
     if (isOn) {
         toggle.backgroundColor = COLOR_ACCENT_GOLD;
         toggle.layer.borderColor = COLOR_ACCENT_GOLD.CGColor;
@@ -330,17 +331,21 @@
 }
 
 - (void)addThemeSlider:(NSString *)title property:(NSString *)prop max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(MenuSliderHandler)handler {
-  #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-retain-cycles"
-[self addSlider:title min:min max:max value:value handler:^(CGFloat val) {
-    if ([prop isEqualToString:@"corner"]) self.layer.cornerRadius = val;
-}];
-#pragma clang diagnostic pop
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Warc-retain-cycles"
+    [self addSlider:title min:min max:max value:value handler:^(CGFloat val) {
+        if ([prop isEqualToString:@"corner"]) self.layer.cornerRadius = val;
+        if (handler) handler(val);
+    }];
+    #pragma clang diagnostic pop
+}
 
 - (void)makeDraggable {
-    self.panGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-    self.panGesture.delegate = self;
-    [self addGestureRecognizer:self.panGesture];
+    if (!self.panGesture) {
+        self.panGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+        self.panGesture.delegate = self;
+        [self addGestureRecognizer:self.panGesture];
+    }
     self.canMove = YES;
 }
 
@@ -363,12 +368,12 @@
 }
 
 - (void)setMenuAccentColor:(UIColor *)color { self.accentColor = color; }
-- (void)setMenuGlassEffect:(BOOL)enabled { /* Blur effect logic */ }
+- (void)setMenuGlassEffect:(BOOL)enabled { }
 - (void)setMenuCornerRadius:(CGFloat)radius { self.layer.cornerRadius = radius; }
 - (void)setMenuBorderWidth:(CGFloat)width { self.layer.borderWidth = width; }
 - (void)setMenuTitle:(NSString *)title { self.tabTitleLabel.text = title; }
-- (void)setMenuSubtitle:(NSString *)subtitle { /* logic */ }
-- (void)setFooterText:(NSString *)text { /* logic */ }
+- (void)setMenuSubtitle:(NSString *)subtitle { }
+- (void)setFooterText:(NSString *)text { }
 
 - (void)closeMenu {
     [self removeFromSuperview];
@@ -379,17 +384,17 @@
 // =========================================================================
 
 - (void)addControlView:(UIView *)view height:(CGFloat)height {
-    NSMutableArray *containers = objc_getAssociatedObject(self, "internalContainers");
-    if (!containers) return;
-    
-    UIView *container = containers[self.selectedTabIndex];
-    view.frame = CGRectMake(0, self.contentHeight, CGRectGetWidth(self.scrollView.bounds), height);
+    if (self.selectedTabIndex >= self.internalContainers.count) return;
+
+    UIView *container = self.internalContainers[self.selectedTabIndex];
+    CGFloat width = CGRectGetWidth(self.scrollView.bounds);
+    view.frame = CGRectMake(0, self.contentHeight, width, height);
     [container addSubview:view];
 
     self.contentHeight += height + 10;
-    container.frame = CGRectMake(0, 0, CGRectGetWidth(self.scrollView.bounds), self.contentHeight);
-    self.contentView.frame = CGRectMake(0, 0, CGRectGetWidth(self.scrollView.bounds), self.contentHeight);
-    self.scrollView.contentSize = CGSizeMake(CGRectGetWidth(self.scrollView.bounds), self.contentHeight);
+    container.frame = CGRectMake(0, 0, width, self.contentHeight);
+    self.contentView.frame = CGRectMake(0, 0, width, self.contentHeight);
+    self.scrollView.contentSize = CGSizeMake(width, self.contentHeight);
 }
 
 - (void)tabButtonTapped:(UIButton *)sender {
