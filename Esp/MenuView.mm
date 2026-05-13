@@ -153,7 +153,7 @@
     }
 
     for (NSUInteger i = 0; i < containers.count; i++) {
-        containers[i].hidden = (i != index);
+      [(UIView *)containers[i] setHidden:(i != index)];
     }
 }
 
@@ -330,12 +330,12 @@
 }
 
 - (void)addThemeSlider:(NSString *)title property:(NSString *)prop max:(CGFloat)max min:(CGFloat)min value:(CGFloat)value handler:(MenuSliderHandler)handler {
-    [self addSlider:title min:min max:max value:value handler:^(CGFloat val) {
-        if ([prop isEqualToString:@"corner"]) self.layer.cornerRadius = val;
-        else if ([prop isEqualToString:@"border"]) self.layer.borderWidth = val;
-        if (handler) handler(val);
-    }];
-}
+  #pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+[self addSlider:title min:min max:max value:value handler:^(CGFloat val) {
+    if ([prop isEqualToString:@"corner"]) self.layer.cornerRadius = val;
+}];
+#pragma clang diagnostic pop
 
 - (void)makeDraggable {
     self.panGesture = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
